@@ -1,0 +1,231 @@
+{
+    "AWSTemplateFormatVerison": "2010-09-09",
+    "Description": "task template to spin ASG with 2 EC2",
+    "Parameters":{
+        "EnvironmentType":{
+            "Description":"Prod is only allowed this time, enter 'prod'",
+            "Type":"String"
+            
+        },
+        "CidrForProdVpc":{
+            "Description":"Cidr Block Range for VPC",
+            "Type":"String"
+        },
+        "StackTTL":{
+            "Description":"Minutes after the resources should be destroyed",
+            "Type":"String"
+        },
+        "CIDRforSubnet1A":{
+            "Description":"Cidr Range for Subnte-1A",
+            "Type":"String"
+        },
+        "CIDRforSubnet1B":{
+            "Description":"Cidr Range for Subnte-1B",
+            "Type":"String"
+        }
+    },
+    "Conditions":{
+        "CreateProdResources" : {"Fn::Equals" : [{"Ref" : "EnvironmentType"}, "prod"]},
+        "CreateDevResources"  : {"Fn::Equals" : [{"Ref" : "EnvironmentType"}, "dev"]}
+    },
+    "Resources":{
+        "VpcProd":{
+            "Type" : "AWS::EC2::VPC",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+               "CidrBlock" : {"Ref":"CidrForProfVpc"},
+               "EnableDnsSupport" : true,
+               "EnableDnsHostnames" : true,
+               "InstanceTenancy" : "default",
+               "Tags" : [{"Name" : "TTLDemo"}]
+            }
+         },
+
+        "Nacl":{
+            "Type": "AWS::EC2::NetworkAcl",
+            "Condition":"CreateProdResources",
+            "Properties": {
+                "VpcId": {"Ref": "VpcProd"},
+                "Tags" : [ { "Key" : "Name", "Value" : "DemoACL" } ]
+            }
+        },
+        "NaclEntryProperty":{
+            "Type" : "AWS::EC2::NetworkAclEntry",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+               "CidrBlock" : "0.0.0.0/0",
+               "Egress" : "true",
+               "Protocol" : "-1",
+               "NetworkAclId" : {"Ref":"Nacl"},
+               "RuleAction" : "allow",
+               "RuleNumber" : "100"
+            }
+         },
+        
+        "PvtRoutingTable":{
+                "Type" : "AWS::EC2::RouteTable",
+                "Condition":"CreateProdResources",
+                "Properties" : {
+                   "VpcId" : {"Ref":"VpcProd"},
+                   "Tags" : [ { "Key" : "Name", "Value" : "DemoRT" } ]
+                }    
+        },
+        
+        "PubRoutingTable":{
+            "Type" : "AWS::EC2::RouteTable",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+               "VpcId" : {"Ref":"VpcProd"},
+               "Tags" : [ { "Key" : "Name", "Value" : "DemoRT" } ]
+            }    
+        },
+
+        "RoutingProperty":{
+            "Type" : "AWS::EC2::Route",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+              "DestinationCidrBlock" : "0.0.0.0/0",
+              "NatGatewayId" : {"Ref":"NAT"},
+              "RouteTableId" : {"Ref":"PvtRoutingTable"}
+            }
+          },
+
+        "NAT" : {
+            "DependsOn" : "igw-aff774d6",
+            "Type" : "AWS::EC2::NatGateway",
+            "Properties" : {
+              "AllocationId" : { "Fn::GetAtt" : ["EIP", "AllocationId"]},
+              "SubnetId" : { "Ref" : "Subnet"},
+              "Tags" : [ {"Key" : "Name", "Value" : "DemoNAT" } ]
+            }
+          },
+        "EIP" : {
+            "Type" : "AWS::EC2::EIP",
+            "Properties" : {
+              "Domain" : "vpc"
+            }
+          },
+        "RouteToPubRT" : {
+            "Type" : "AWS::EC2::Route",
+            "Properties" : {
+              "RouteTableId" : { "Ref" : "PvtRouteTable" },
+              "DestinationCidrBlock" : "0.0.0.0/0",
+              "NatGatewayId" : { "Ref" : "NAT" }
+            }
+          },
+        
+        "Subnet1A":{
+                "Type" : "AWS::EC2::Subnet",
+                "Condition":"CreateProdResources",
+                "Properties" : {
+                   "VpcId" : { "Ref" : "myVPC" },
+                   "CidrBlock" : {"Ref":"CIDRforSubnet1A"},
+                   "AvailabilityZone" : "us-east-1a",
+                   "Tags" : [ { "Key" : "Name", "Value" : "DemoSUBNET1A" } ]
+                }
+        },
+        "RoutingForSubnet1A":{
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+                "RouteTableId" : {"Ref":"PvtRoutingTable"},
+                "SubnetId" : {"Ref":"Subnet1A"}
+            }
+          },
+
+        "Subnet1B":{
+            "Type" : "AWS::EC2::Subnet",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+               "VpcId" : { "Ref" : "myVPC" },
+               "CidrBlock" : {"Ref":"CIDRforSubnet1B"},
+               "AvailabilityZone" : "us-east-1b",
+               "Tags" : [ { "Key" : "Name", "Value" : "DemoSUBNET1B" } ]
+            }
+        },
+        
+        "RoutingForSubnet1B":{
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Condition":"CreateProdResources",
+            "Properties" : {
+              "RouteTableId" : {"Ref":"PvtRoutingTable"},
+              "SubnetId" : {"Ref":"Subnet1B"}
+            }
+          },       
+        
+        "TaskLaunchConfig":{
+            "Type":"AWS::AutoScaling::LaunchConfiguration",
+            "Condition":"CreateProdResources",
+            "AssociatePublicIpAddress": false,
+            "ImageId": "ami-467ca739",
+            "InstanceType": "t2.micro",
+            "KeyName":"Hima",
+            "MetaData":{
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                      "All" : [ "ConfigureApache", "ConfigureTTL" ]
+                    },
+          
+                    "ConfigureApache" : {
+                      "packages" : {
+                        "yum" : {
+                          "httpd" : []
+                        }
+                      },
+          
+                      "files" : {
+                        "/var/www/html/index.html" : {
+                          "content" : { "Fn::Join" : ["\n", [
+                            "<img src=\"https://s3.amazonaws.com/cloudformation-examples/cloudformation_graphic.png\" alt=\"AWS CloudFormation Logo\"/>",
+                            "<h1>Congratulations, you have successfully launched the AWS CloudFormation sample.</h1>"
+                          ]]},
+                          "mode"    : "000644",
+                          "owner"   : "root",
+                          "group"   : "root"
+                        }
+                      },
+          
+                      "services" : {
+                        "sysvinit" : {
+                          "httpd"    : { "enabled" : "true", "ensureRunning" : "true" }
+                        }
+                      }
+                    },
+          
+                    "ConfigureTTL" : {
+                      "files" : {
+                         "/usr/local/bin/deletestack.sh" : {
+                          "content" : { "Fn::Join" : ["", [ "aws cloudformation delete-stack --region ", { "Ref" : "AWS::Region" }, " --stack-name ", { "Ref" : "AWS::StackId" } ]]},
+                          "mode"    : "000400",
+                          "owner"   : "root",
+                          "group"   : "root"
+                        }
+                      },
+                      "commands" : {
+                        "schedule_stack_deletion" : {
+                          "command" : { "Fn::Join" : ["", [ "at -f /usr/local/bin/deletestack.sh now + ", { "Ref" : "StackTTL" }, " minutes" ]]}
+                        }
+                      }
+                    }
+                  }
+          },
+            "UserData":{"Fn::Base64":{"Fn::Join":["\n",[
+                "#!/bin/bash",
+                "yum update -y",
+                "yum install at -y",
+                {"Fn::Sub":"/opt/aws/bin/cfn-init -v --stack  { "Ref" : "AWS::StackName" } --resource ${curl http://169.254.169.254/latest/meta-data/instance-id} --configsets All --region { "Ref" : "AWS::Region" }"}
+            ]]}}
+        },
+
+        "AutoscalingGrp":{
+            "Type":"AWS::AutoScaling::AutoScalingGroup",
+            "Condition":"CreateProdResources",
+            "AutoScalingGroupName": "ec2_farm",
+            "AvailabilityZones":[ "us-east-1a", "us-east-1b" ],
+            "Cooldown":"default",
+            "MinSize" : "2",
+            "MaxSize" : "2",
+            "LaunchConfigurationName": {"Ref":"TaskLaunchConfig"}
+        }
+    }
+}
